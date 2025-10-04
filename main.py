@@ -4,7 +4,41 @@ import yfinance as yf
 import pandas as pd
 import requests
 import pandas as pd
+from fastapi import FastAPI
+import yfinance as yf
+import pandas as pd
 
+app = FastAPI()
+
+@app.get("/")
+def home():
+    return {"status": "Backend running ✅"}
+
+@app.get("/analyze")
+def analyze(symbol: str):
+    try:
+        data = yf.download(symbol, period="3mo", interval="1d")
+        if data.empty:
+            return {"error": f"No data found for {symbol}"}
+
+        # Calculate RSI
+        delta = data["Close"].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        rsi_value = round(rsi.iloc[-1], 2)
+
+        # Calculate MACD
+        exp1 = data["Close"].ewm(span=12, adjust=False).mean()
+        exp2 = data["Close"].ewm(span=26, adjust=False).mean()
+        macd = exp1 - exp2
+        signal = macd.ewm(span=9, adjust=False).mean()
+        macd_value = round(macd.iloc[-1] - signal.iloc[-1], 4)
+
+        return {"symbol": symbol, "rsi": rsi_value, "macd": macd_value}
+    except Exception as e:
+        return {"error": str(e)}
 def fetch_ticker_data(symbol: str):
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1h&range=1d"
