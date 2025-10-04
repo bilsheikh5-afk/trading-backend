@@ -1,84 +1,62 @@
+# path: main.py
 import requests
 import pandas as pd
-import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI()
+app = FastAPI(title="Trading Backend", version="1.1")
 
-API_KEY = os.getenv("FMP_API_KEY")  # Set this in Render env vars
+# Allow frontend connections (important for browsers)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Replace with your frontend domain for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-COINGECKO_IDS = {"btc": "bitcoin", "eth": "ethereum"}  # Add more as needed
+API_KEY = "UgtPrbl46z4iFpolbPTmoEWbyEhx70MV"
 
 @app.get("/")
 def root():
-    return {"status": "✅ Trading Backend is running!"}
+    return {"status": "✅ Trading Backend is live and stable"}
 
 @app.get("/analyze")
 def analyze(symbol: str):
+    """
+    Analyze a trading symbol (crypto, stock, or forex)
+    Computes RSI and MACD indicators.
+    """
     try:
-        # Normalize symbol (handle BTCUSD -> BTC-USD for consistency)
-        if not symbol.endswith("-USD") and symbol.upper().endswith("USD"):
-            symbol = symbol[:-3] + "-USD"
-        
-        is_crypto = symbol.upper() in ["BTC-USD", "ETH-USD"]  # Extend list as needed
-        
-        if is_crypto:
-            # Use CoinGecko for crypto (more reliable, free)
-            ticker = symbol.split("-")[0].lower()
-            if ticker in COINGECKO_IDS:
-                coin_id = COINGECKO_IDS[ticker]
-                url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-                params = {"vs_currency": "usd", "days": 30}
-                r = requests.get(url, params=params)
-                if r.status_code != 200:
-                    return {"symbol": symbol, "error": f"Failed to fetch crypto data: {r.text}"}
-                data = pd.DataFrame(r.json()["prices"], columns=["timestamp", "Close"])
-                data["Close"] = data["Close"].astype(float)
-            else:
-                raise ValueError(f"Unsupported crypto: {ticker}")
-        else:
-            # Use FMP for stocks (or extend for other cryptos)
-            # For crypto like BTCUSD, you'd detect and use crypto endpoint below
-            if symbol.upper().endswith("USD") and len(symbol) <= 7:  # e.g., BTCUSD
-                # FMP crypto historical endpoint
-                crypto_symbol = symbol.replace("-", "").upper()  # BTC-USD -> BTCUSD
-                url = f"https://financialmodelingprep.com/stable/historical-price-eod/full"
-                params = {"symbol": crypto_symbol, "apikey": API_KEY}
-                r = requests.get(url, params=params)
-                json_data = r.json()
-                if not json_data or "historical" not in json_data[0]:  # FMP crypto wraps in list
-                    return {"symbol": symbol, "error": "No data available for this crypto symbol (check API key/limits)"}
-                data = pd.DataFrame(json_data[0]["historical"])
-            else:
-                # Stock endpoint
-                url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol.upper()}?timeseries=30&apikey={API_KEY}"
-                r = requests.get(url)
-                json_data = r.json()
-                if "historical" not in json_data:
-                    return {"symbol": symbol, "error": "No data available for this symbol (check API key/limits)"}
-                data = pd.DataFrame(json_data["historical"])
-            
-            data.rename(columns={"close": "Close"}, inplace=True)
+        symbol = symbol.upper().replace(" ", "")
+        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}?timeseries=60&apikey={API_KEY}"
+        r = requests.get(url)
+        data_json = r.json()
 
-        # RSI Calculation (drop NaNs implicitly via iloc)
+        if "historical" not in data_json or len(data_json["historical"]) < 20:
+            return {"symbol": symbol, "error": "No valid data found (check symbol or API limit)"}
+
+        data = pd.DataFrame(data_json["historical"])
+        data.rename(columns={"close": "Close"}, inplace=True)
+        data = data[::-1]  # reverse order (oldest → latest)
+
         delta = data["Close"].diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
         rs = gain / loss
         rsi = 100 - (100 / (1 + rs))
-        rsi_value = round(rsi.iloc[-1], 2) if not pd.isna(rsi.iloc[-1]) else None
+        rsi_value = round(rsi.iloc[-1], 2)
 
-        # MACD Calculation
         exp1 = data["Close"].ewm(span=12, adjust=False).mean()
         exp2 = data["Close"].ewm(span=26, adjust=False).mean()
         macd = exp1 - exp2
         signal = macd.ewm(span=9, adjust=False).mean()
-        macd_value = round((macd.iloc[-1] - signal.iloc[-1]), 4) if len(data) >= 26 else None
+        macd_value = round(macd.iloc[-1] - signal.iloc[-1], 4)
 
-        trend = "📈 Bullish" if macd_value and macd_value > 0 else "📉 Bearish" if macd_value else "❓ Neutral"
+        trend = "📈 Bullish" if macd_value > 0 else "📉 Bearish"
 
         return {
-            "symbol": symbol.upper(),
+            "symbol": symbol,
             "rsi": rsi_value,
             "macd": macd_value,
             "trend": trend
