@@ -1,65 +1,76 @@
 # path: main.py
-import requests
 import pandas as pd
+import yfinance as yf
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-app = FastAPI(title="Trading Backend", version="1.1")
+app = FastAPI(title="Trading Backend - Yahoo Finance", version="2.0")
 
-# Allow frontend connections (important for browsers)
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your frontend domain for production
+    allow_origins=["*"],  # for production, restrict this to your frontend domain
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-API_KEY = "UgtPrbl46z4iFpolbPTmoEWbyEhx70MV"
 
 @app.get("/")
 def root():
-    return {"status": "✅ Trading Backend is live and stable"}
+    return {"status": "✅ Trading Backend (Yahoo Finance) is live and stable"}
+
 
 @app.get("/analyze")
 def analyze(symbol: str):
     """
-    Analyze a trading symbol (crypto, stock, or forex)
+    Analyze a symbol (crypto, stock, or forex) using Yahoo Finance.
     Computes RSI and MACD indicators.
     """
     try:
-        symbol = symbol.upper().replace(" ", "")
-        url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}?timeseries=60&apikey={API_KEY}"
-        r = requests.get(url)
-        data_json = r.json()
+        # Normalize input
+        symbol = symbol.upper().strip()
 
-        if "historical" not in data_json or len(data_json["historical"]) < 20:
-            return {"symbol": symbol, "error": "No valid data found (check symbol or API limit)"}
+        # Common alias correction
+        symbol_map = {
+            "BTC-USD": "BTC-USD",
+            "ETH-USD": "ETH-USD",
+            "EURUSD": "EURUSD=X",
+            "EURUSD=X": "EURUSD=X",
+            "AAPL": "AAPL",
+        }
+        yf_symbol = symbol_map.get(symbol, symbol)
 
-        data = pd.DataFrame(data_json["historical"])
-        data.rename(columns={"close": "Close"}, inplace=True)
-        data = data[::-1]  # reverse order (oldest → latest)
+        # Fetch data (last 90 days)
+        data = yf.download(yf_symbol, period="90d", interval="1d", progress=False)
 
-        delta = data["Close"].diff()
-        gain = delta.clip(lower=0).rolling(window=14).mean()
-        loss = (-delta.clip(upper=0)).rolling(window=14).mean()
+        if data.empty:
+            return {"symbol": symbol, "error": "No valid data found (symbol not recognized)"}
+
+        # --- RSI Calculation ---
+        data["delta"] = data["Close"].diff()
+        gain = data["delta"].clip(lower=0).rolling(window=14).mean()
+        loss = -data["delta"].clip(upper=0).rolling(window=14).mean()
         rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        rsi_value = round(rsi.iloc[-1], 2)
+        data["RSI"] = 100 - (100 / (1 + rs))
+        rsi_value = round(data["RSI"].iloc[-1], 2)
 
+        # --- MACD Calculation ---
         exp1 = data["Close"].ewm(span=12, adjust=False).mean()
         exp2 = data["Close"].ewm(span=26, adjust=False).mean()
         macd = exp1 - exp2
         signal = macd.ewm(span=9, adjust=False).mean()
         macd_value = round(macd.iloc[-1] - signal.iloc[-1], 4)
 
+        # --- Trend ---
         trend = "📈 Bullish" if macd_value > 0 else "📉 Bearish"
 
         return {
             "symbol": symbol,
             "rsi": rsi_value,
             "macd": macd_value,
-            "trend": trend
+            "trend": trend,
+            "source": "Yahoo Finance"
         }
 
     except Exception as e:
