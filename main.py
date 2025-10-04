@@ -4,8 +4,9 @@ import requests, pandas as pd, os
 
 API_KEY = os.getenv("ALPHAVANTAGE_KEY", "6BQMU6KVJH8QH4TR")
 
-app = FastAPI(title="Trading Backend (Alpha Vantage)")
+app = FastAPI(title="Trading Backend (Alpha Vantage — Stocks + Crypto)")
 
+# Allow any frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,33 +17,35 @@ app.add_middleware(
 
 @app.get("/")
 def root():
-    return {"status": "✅ Alpha Vantage backend is live"}
+    return {"status": "✅ Alpha Vantage backend live"}
 
+# --- Helpers ---------------------------------------------------
 def fetch_data(symbol: str):
-    base_url = "https://www.alphavantage.co/query"
-
-    # choose correct API function
+    base = "https://www.alphavantage.co/query"
+    # Crypto handling
     if "-USD" in symbol:
+        coin = symbol.split("-")[0]
         params = {
             "function": "DIGITAL_CURRENCY_DAILY",
-            "symbol": symbol.split("-")[0],
+            "symbol": coin,
             "market": "USD",
             "apikey": API_KEY
         }
-        r = requests.get(base_url, params=params, timeout=15)
+        r = requests.get(base, params=params, timeout=15)
         data = r.json().get("Time Series (Digital Currency Daily)", {})
         if not data:
             return None
         df = pd.DataFrame(data).T
         df["Close"] = df["4a. close (USD)"].astype(float)
     else:
+        # Stock handling
         params = {
             "function": "TIME_SERIES_DAILY_ADJUSTED",
             "symbol": symbol,
             "apikey": API_KEY,
             "outputsize": "compact"
         }
-        r = requests.get(base_url, params=params, timeout=15)
+        r = requests.get(base, params=params, timeout=15)
         data = r.json().get("Time Series (Daily)", {})
         if not data:
             return None
@@ -59,11 +62,12 @@ def compute_indicators(closes: pd.Series):
     rsi_val = round(rsi.iloc[-1], 2)
     exp1 = closes.ewm(span=12, adjust=False).mean()
     exp2 = closes.ewm(span=26, adjust=False).mean()
-    macd_line = exp1 - exp2
-    signal = macd_line.ewm(span=9, adjust=False).mean()
-    macd_val = round(macd_line.iloc[-1] - signal.iloc[-1], 4)
+    macd = exp1 - exp2
+    signal = macd.ewm(span=9, adjust=False).mean()
+    macd_val = round(macd.iloc[-1] - signal.iloc[-1], 4)
     trend = "📈 Bullish" if macd_val > 0 else "📉 Bearish"
     return rsi_val, macd_val, trend
+# ---------------------------------------------------------------
 
 @app.get("/analyze")
 def analyze(symbols: str = Query(...)):
