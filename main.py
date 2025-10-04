@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+import requests
 import yfinance as yf
 import pandas as pd
 
@@ -11,13 +12,26 @@ def root():
 @app.get("/analyze")
 def analyze(symbol: str):
     try:
-        # Use a smaller data period (more reliable for Render)
-        data = yf.download(symbol, period="1mo", interval="1d", progress=False)
+        # Handle crypto tickers via CoinGecko API
+        if symbol.endswith("-USD") and symbol.split("-")[0].lower() in ["btc", "eth"]:
+            coin = symbol.split("-")[0].lower()
+            url = f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart"
+            params = {"vs_currency": "usd", "days": 30}
+            r = requests.get(url, params=params)
 
-        if data is None or data.empty:
-            return {"symbol": symbol, "error": "No data available from Yahoo Finance"}
+            if r.status_code != 200:
+                return {"symbol": symbol, "error": "Failed to fetch crypto data"}
 
-        # RSI calculation
+            data = pd.DataFrame(r.json()["prices"], columns=["timestamp", "Close"])
+            data["Close"] = data["Close"].astype(float)
+
+        else:
+            # Use yfinance for stock/forex
+            data = yf.download(symbol, period="1mo", interval="1d", progress=False)
+            if data.empty:
+                return {"symbol": symbol, "error": "No stock/forex data available"}
+
+        # RSI Calculation
         delta = data["Close"].diff()
         gain = delta.clip(lower=0).rolling(window=14).mean()
         loss = (-delta.clip(upper=0)).rolling(window=14).mean()
@@ -25,7 +39,7 @@ def analyze(symbol: str):
         rsi = 100 - (100 / (1 + rs))
         rsi_value = round(rsi.iloc[-1], 2)
 
-        # MACD calculation
+        # MACD Calculation
         exp1 = data["Close"].ewm(span=12, adjust=False).mean()
         exp2 = data["Close"].ewm(span=26, adjust=False).mean()
         macd = exp1 - exp2
