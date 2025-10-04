@@ -2,6 +2,31 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 import yfinance as yf
 import pandas as pd
+import requests
+import pandas as pd
+
+def fetch_ticker_data(symbol: str):
+    try:
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?interval=1h&range=1d"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            print(f"⚠️ Failed download: {symbol} ({response.status_code})")
+            return pd.DataFrame()
+        
+        data = response.json()
+        if "chart" not in data or "result" not in data["chart"]:
+            print(f"⚠️ Invalid JSON format for {symbol}")
+            return pd.DataFrame()
+        
+        timestamps = data["chart"]["result"][0]["timestamp"]
+        close_prices = data["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+        df = pd.DataFrame({"timestamp": timestamps, "close": close_prices})
+        return df
+    
+    except Exception as e:
+        print(f"❌ Failed to get {symbol}: {e}")
+        return pd.DataFrame()
 import time
 import threading
 
