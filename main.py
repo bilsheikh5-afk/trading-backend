@@ -23,20 +23,36 @@ def root():
     return {"status": "✅ Trading Backend (Alpha Vantage) is live and stable"}
 
 def fetch_data(symbol: str):
-    """Fetch daily prices for one symbol"""
-    url = "https://www.alphavantage.co/query"
-    params = {
-        "function": "TIME_SERIES_DAILY_ADJUSTED",
-        "symbol": symbol,
-        "apikey": API_KEY,
-        "outputsize": "compact"
-    }
-    r = requests.get(url, params=params, timeout=10)
-    data = r.json().get("Time Series (Daily)", {})
-    if not data:
-        return None
-    df = pd.DataFrame(data).T.astype(float)
-    df = df.rename(columns={"4. close": "Close"})
+    """Fetch data for stocks and crypto using Alpha Vantage."""
+    base_url = "https://www.alphavantage.co/query"
+
+    if "-USD" in symbol:  # crypto
+        params = {
+            "function": "DIGITAL_CURRENCY_DAILY",
+            "symbol": symbol.split("-")[0],
+            "market": "USD",
+            "apikey": API_KEY
+        }
+        r = requests.get(base_url, params=params, timeout=10)
+        data = r.json().get("Time Series (Digital Currency Daily)", {})
+        if not data:
+            return None
+        df = pd.DataFrame(data).T.astype(float)
+        df = df.rename(columns={"4a. close (USD)": "Close"})
+    else:  # stock
+        params = {
+            "function": "TIME_SERIES_DAILY_ADJUSTED",
+            "symbol": symbol,
+            "apikey": API_KEY,
+            "outputsize": "compact"
+        }
+        r = requests.get(base_url, params=params, timeout=10)
+        data = r.json().get("Time Series (Daily)", {})
+        if not data:
+            return None
+        df = pd.DataFrame(data).T.astype(float)
+        df = df.rename(columns={"4. close": "Close"})
+    
     return df["Close"].iloc[::-1]
 
 def compute_indicators(closes: pd.Series):
