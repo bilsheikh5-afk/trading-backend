@@ -1,160 +1,209 @@
-```html
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mobile Trading Advisor</title>
-    <style>
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trading Advisor - Live RSI & MACD</title>
+  <style>
+    body {
+      background: linear-gradient(135deg, #141e30, #243b55);
+      font-family: 'Segoe UI', sans-serif;
+      color: #fff;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 800px;
+      margin: 30px auto;
+      padding: 20px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 12px;
+      box-shadow: 0 0 10px rgba(255,255,255,0.2);
+    }
+    h1 {
+      text-align: center;
+      color: #00ffb3;
+      font-size: 26px;
+    }
+    .status { 
+      text-align: center; 
+      margin-bottom: 15px; 
+      font-size: 18px; 
+    }
+    .online { color: #00ffb3; }
+    .offline { color: #ff5e5e; }
+    .settings, .results {
+      background: rgba(255,255,255,0.08);
+      padding: 15px;
+      border-radius: 10px;
+      margin-top: 20px;
+    }
+    input, button, textarea {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      margin-top: 10px;
+      font-size: 15px;
+    }
+    button {
+      background: #00ffb3;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #00d68f; }
+    .symbol {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(255,255,255,0.05);
+      padding: 10px;
+      border-radius: 8px;
+      margin-top: 8px;
+    }
+    .trend { font-size: 20px; }
+    .up { color: #00ff99; }
+    .down { color: #ff5e5e; }
+    .flat { color: #cccccc; }
+    .reconnect-btn {
+      margin-top: 8px;
+      background: #ffaa00;
+      color: #000;
+      width: auto;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-weight: bold;
+    }
+    .reconnect-btn:hover { background: #ffcc33; }
+    .error { color: #ff5e5e; font-style: italic; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📊 Trading Advisor</h1>
+    <div class="status" id="status">Checking backend...</div>
+    <div style="text-align:center">
+      <button class="reconnect-btn" id="reconnectBtn">Reconnect 🔄</button>
+    </div>
+
+    <div class="settings">
+      <h3>Settings</h3>
+      <label>Backend API URL</label>
+      <input id="apiUrl" value="https://trading-backend-dcph.onrender.com" />
+      <label>Symbols (comma separated)</label>
+      <textarea id="symbols">BTC-USD,ETH-USD,EURUSD=AAPL</textarea>
+      <label>Auto Refresh (seconds)</label>
+      <input id="refresh" type="number" value="60" />
+      <button id="save">Save Settings</button>
+    </div>
+
+    <div class="results" id="results">
+      <h3>Live RSI & MACD Data</h3>
+      <div id="output">No data yet...</div>
+    </div>
+  </div>
+
+  <script>
+    const apiUrlInput = document.getElementById("apiUrl");
+    const symbolsInput = document.getElementById("symbols");
+    const refreshInput = document.getElementById("refresh");
+    const output = document.getElementById("output");
+    const statusDiv = document.getElementById("status");
+    const saveBtn = document.getElementById("save");
+    const reconnectBtn = document.getElementById("reconnectBtn");
+
+    let apiUrl = apiUrlInput.value;
+    let refreshRate = parseInt(refreshInput.value) * 1000;
+    let isOnline = false;
+
+    saveBtn.onclick = () => {
+      apiUrl = apiUrlInput.value;
+      refreshRate = parseInt(refreshInput.value) * 1000;
+      checkBackend();
+      fetchData();
+    };
+
+    reconnectBtn.onclick = () => {
+      statusDiv.innerHTML = "🔄 Reconnecting...";
+      checkBackend();
+      fetchData();
+    };
+
+    async function checkBackend() {
+      try {
+        const res = await fetch(apiUrl + "/");
+        if (res.ok) {
+          isOnline = true;
+          statusDiv.innerHTML = "🟢 <span class='online'>Online</span>";
+        } else {
+          isOnline = false;
+          statusDiv.innerHTML = "🔴 <span class='offline'>Offline</span>";
         }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
+      } catch {
+        isOnline = false;
+        statusDiv.innerHTML = "🔴 <span class='offline'>Offline</span>";
+      }
+    }
+
+    function getTrendSymbol(current, previous) {
+      if (current > previous) return "<span class='trend up'>📈</span>";
+      if (current < previous) return "<span class='trend down'>📉</span>";
+      return "<span class='trend flat'>➡</span>";
+    }
+
+    async function fetchData() {
+      if (!isOnline) {
+        output.innerHTML = "⚠️ Backend offline, retrying...";
+        return;
+      }
+
+      const symbols = symbolsInput.value.split(",");
+      output.innerHTML = "⏳ Fetching data...";
+      let html = "";
+
+      for (let i = 0; i < symbols.length; i++) {
+        const symbol = symbols[i].trim();
+        try {
+          const response = await fetch(`${apiUrl}/analyze?symbol=${encodeURIComponent(symbol)}`);
+          const data = await response.json();
+          const { rsi, macd, trend, error } = data;
+
+          if (error) throw new Error(error);
+
+          // Dummy prev for demo (replace with real if storing state)
+          const prevRsi = Math.random() * 100;
+          const prevMacd = Math.random() * 10 - 5;
+
+          html += `
+            <div class="symbol">
+              <div>
+                <b>${symbol}</b><br/>
+                RSI: ${rsi?.toFixed?.(2) || "N/A"} ${getTrendSymbol(rsi, prevRsi)}<br/>
+                MACD: ${macd?.toFixed?.(4) || "N/A"} ${getTrendSymbol(macd, prevMacd)}<br/>
+                <small>Trend: ${trend}</small>
+              </div>
+            </div>
+          `;
+        } catch (err) {
+          html += `<div class="symbol"><b>${symbol}</b>: <span class="error">❌ ${err.message}</span></div>`;
         }
-        
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-            overflow: hidden;
+
+        // Delay to respect rate limits (10s between calls)
+        if (i < symbols.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 10000));
         }
-        
-        .header {
-            background: linear-gradient(135deg, #2c3e50, #34495e);
-            color: white;
-            padding: 20px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 1.4em;
-            margin-bottom: 5px;
-        }
-        
-        .header p {
-            opacity: 0.8;
-            font-size: 0.9em;
-        }
-        
-        .tabs {
-            display: flex;
-            background: #34495e;
-        }
-        
-        .tab {
-            flex: 1;
-            padding: 15px;
-            text-align: center;
-            color: white;
-            cursor: pointer;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
-        }
-        
-        .tab.active {
-            border-bottom: 3px solid #3498db;
-            background: rgba(52, 152, 219, 0.1);
-        }
-        
-        .tab-content {
-            display: none;
-            padding: 20px;
-        }
-        
-        .tab-content.active {
-            display: block;
-        }
-        
-        .form-group {
-            margin-bottom: 15px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #2c3e50;
-        }
-        
-        input, select, textarea {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #ecf0f1;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s;
-        }
-        
-        input:focus, select:focus, textarea:focus {
-            border-color: #3498db;
-            outline: none;
-        }
-        
-        .btn {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-            border: none;
-            padding: 15px 20px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            width: 100%;
-            transition: transform 0.2s;
-        }
-        
-        .btn:active {
-            transform: scale(0.98);
-        }
-        
-        .btn-success {
-            background: linear-gradient(135deg, #27ae60, #229954);
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 20px;
-            display: none;
-        }
-        
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        
-        .results {
-            display: none;
-            margin-top: 20px;
-        }
-        
-        .trade-card {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
-            transition: transform 0.2s;
-        }
-        
-        .trade-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0
+      }
+      output.innerHTML = html;
+    }
+
+    // Auto loops
+    setInterval(checkBackend, 30000);  // Health check every 30s
+    setInterval(fetchData, refreshRate);  // Data refresh
+
+    checkBackend();
+    fetchData();
+  </script>
+</body>
+</html>
